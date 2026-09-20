@@ -74,6 +74,16 @@ export function parseToolPattern(value: unknown): ToolPattern | undefined {
   return pattern;
 }
 
+/** Return whether a parsed permission entry is malformed. */
+export function isMalformedToolPattern(pattern: ToolPattern): boolean {
+  if (!pattern.toolName) return true;
+  if (pattern.argumentPattern === undefined) return false;
+  if (pattern.argumentPattern.trim() === "") return true;
+  return pattern.toolName === "bash" &&
+    (bashPatternAnalyses.get(pattern)?.errors.length ??
+        analyzeBash(pattern.argumentPattern).errors.length) > 0;
+}
+
 function literalPrefixTable(value: string): number[] {
   const table = new Array<number>(value.length).fill(0);
   let prefixLength = 0;

@@ -30,6 +30,7 @@ import {
 } from "./constants.ts";
 import { parseModelSpec } from "./model.ts";
 import {
+  isMalformedToolPattern,
   MAX_WILDCARD_PATTERN_LENGTH,
   parseToolPattern,
 } from "./permissions.ts";
@@ -438,13 +439,18 @@ export function validateSettingsFile(
           continue;
         }
         for (const [index, entry] of value.entries()) {
-          if (typeof entry !== "string" || !parseToolPattern(entry)) {
+          const pattern = parseToolPattern(entry);
+          if (typeof entry !== "string" || !pattern) {
             diagnostics.push(
               `${source}: permissions.${key}[${index}] must be a tool pattern string`,
             );
           } else if (entry.length > MAX_WILDCARD_PATTERN_LENGTH) {
             diagnostics.push(
               `${source}: permissions.${key}[${index}] must be at most ${MAX_WILDCARD_PATTERN_LENGTH} characters`,
+            );
+          } else if (key === "deny" && isMalformedToolPattern(pattern)) {
+            diagnostics.push(
+              `${source}: permissions.${key}[${index}] must be a tool pattern string`,
             );
           }
         }
