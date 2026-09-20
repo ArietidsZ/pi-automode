@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
 
 ## Bug fixes
 
+- **Cancelled tool-call accounting** — Route already-cancelled calls through the standard block path. Record counters, denial history, persisted state, UI updates, and decision logs without Bash analysis or classifier work. (#57)
 - **Classifier model validation** — Reject non-string and malformed `classifierModel` values during diagnostics and configuration merging. Preserve valid lower-precedence values and the session-model fallback. Prevent invalid configuration from causing tool-hook exceptions. (#55)
 - **Dynamic Bash allow coverage** — Route commands with unresolved Bash argument expansions or active pathname expansions to classifier review. Preserve static quoted, escaped, and ANSI-C glob literals. (#54)
 
