@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file.
 
 - **Schema-constrained classifier decisions** — Return detailed-stage decisions through an internal `classifier_decision` tool call. Supported providers enforce the schema during generation, and pi-automode validates every returned call locally. When strict tool sampling is available, this reduces fail-closed blocks caused by malformed or contract-invalid decision JSON. (#50)
 
+## Bug fixes
+
+- **Classifier context budgeting** — Estimate fast and detailed classifier requests in tokens instead of mixing UTF-8 bytes with token limits. Check detailed-stage capacity only after the fast stage requests review. Large project contexts no longer block small actions that fit. (#37)
+
 ## [1.16.0] - 2026-09-07
 
 ## New features
