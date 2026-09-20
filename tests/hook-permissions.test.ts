@@ -794,6 +794,50 @@ test("Bash permission allow routes dynamic arguments to the classifier", async (
 	assert.equal(harness.classifierCalls, 1);
 });
 
+test("Bash permission allow routes unquoted pathname expansion to the classifier", async () => {
+	const allow = parseToolPattern("bash(rm -rf *)");
+	assert.ok(allow);
+	const harness = await setupHookTest({
+		config: baseConfig({ permissionAllow: [allow] }),
+		classifier: async () => ({
+			decision: "block",
+			tier: "none",
+			reason: "pathname expansion requires review",
+		}),
+	});
+
+	const result = await harness.emit("tool_call", {
+		toolName: "bash",
+		input: { command: "rm -rf *" },
+	}, harness.ctx) as { block?: boolean; reason?: string } | undefined;
+
+	assert.equal(result?.block, true);
+	assert.match(result?.reason ?? "", /pathname expansion requires review/);
+	assert.equal(harness.classifierCalls, 1);
+});
+
+test("Bash permission allow preserves quoted and escaped glob literals", async () => {
+	const allow = parseToolPattern("bash(echo *)");
+	assert.ok(allow);
+	const harness = await setupHookTest({
+		config: baseConfig({ permissionAllow: [allow] }),
+		classifier: async () => ({
+			decision: "block",
+			tier: "none",
+			reason: "unexpected classifier call",
+		}),
+	});
+
+	for (const command of ['echo "*"', "echo '*'", "echo \\*"]) {
+		const result = await harness.emit("tool_call", {
+			toolName: "bash",
+			input: { command },
+		}, harness.ctx);
+		assert.equal(result, undefined, command);
+	}
+	assert.equal(harness.classifierCalls, 0);
+});
+
 test("the tool hook analyzes each Bash input once", async () => {
 	const deny = parseToolPattern("bash(git push*)");
 	const ask = parseToolPattern("bash(npm publish*)");
