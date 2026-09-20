@@ -828,7 +828,12 @@ test("Bash permission allow preserves quoted and escaped glob literals", async (
 		}),
 	});
 
-	for (const command of ['echo "*"', "echo '*'", "echo \\*"]) {
+	for (const command of [
+		'echo "*"',
+		"echo '*'",
+		"echo \\*",
+		"echo $'can\\'t *'",
+	]) {
 		const result = await harness.emit("tool_call", {
 			toolName: "bash",
 			input: { command },

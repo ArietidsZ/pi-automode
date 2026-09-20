@@ -499,13 +499,23 @@ function containsUnquotedBracketExpression(text: string, start: number): boolean
     hasMember = true;
     index += 1;
   }
-  let quote: "'" | '"' | undefined;
+  let quote: "'" | '"' | "$'" | undefined;
   for (; index < text.length; index += 1) {
     const character = text[index];
     if (quote) {
-      if (character === quote) quote = undefined;
-      else if (quote === '"' && character === "\\") index += 1;
-      else hasMember = true;
+      if (quote === "$'") {
+        if (character === "\\") {
+          if (index + 1 < text.length) {
+            hasMember = true;
+            index += 1;
+          }
+        } else if (character === "'") quote = undefined;
+        else hasMember = true;
+      } else {
+        if (character === quote) quote = undefined;
+        else if (quote === '"' && character === "\\") index += 1;
+        else hasMember = true;
+      }
       continue;
     }
     if (character === "\\") {
@@ -513,6 +523,11 @@ function containsUnquotedBracketExpression(text: string, start: number): boolean
         hasMember = true;
         index += 1;
       }
+      continue;
+    }
+    if (character === "$" && text[index + 1] === "'") {
+      quote = "$'";
+      index += 1;
       continue;
     }
     if (character === "'" || character === '"') {
@@ -526,15 +541,25 @@ function containsUnquotedBracketExpression(text: string, start: number): boolean
 }
 
 function hasUnquotedPathnameExpansion(text: string): boolean {
-  let quote: "'" | '"' | undefined;
+  let quote: "'" | '"' | "$'" | undefined;
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
     if (quote) {
-      if (character === quote) quote = undefined;
-      else if (quote === '"' && character === "\\") index += 1;
+      if (quote === "$'") {
+        if (character === "\\") index += 1;
+        else if (character === "'") quote = undefined;
+      } else {
+        if (character === quote) quote = undefined;
+        else if (quote === '"' && character === "\\") index += 1;
+      }
       continue;
     }
     if (character === "\\") {
+      index += 1;
+      continue;
+    }
+    if (character === "$" && text[index + 1] === "'") {
+      quote = "$'";
       index += 1;
       continue;
     }
