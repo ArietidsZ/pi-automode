@@ -646,22 +646,58 @@ test("classifier request size checks fail closed instead of truncating", () => {
 });
 
 test("classifier request size checks reserve explicit reasoning budgets", () => {
-	const action = serializeClassifierAction("write", {
-		path: "/tmp/project/output.txt",
-		content: "x".repeat(10_000),
-	});
-	const prompt = stagedPrompt(action);
-	const request = {
-		systemPrompt: prompt.systemPrompt,
-		messages: [prompt.contextMessage, prompt.actionMessage],
-	};
-	assert.equal(
-		classifierRequestLimitReason(10_000, 32_000, "low", 512, "fast", request),
-		undefined,
-	);
-	for (const level of ["medium", "high"] as const) {
+	const request = { systemPrompt: "", messages: [] };
+	const contextMargin = 4096;
+	const stageMaxTokens = 512;
+	const budgets = [
+		["minimal", 1024],
+		["low", 4096],
+		["medium", 8192],
+		["high", 16384],
+		["xhigh", 32768],
+		["max", 32768],
+	] as const;
+
+	for (const [level, reasoningBudget] of budgets) {
+		const outputReserve = stageMaxTokens + reasoningBudget;
+		assert.equal(
+			classifierRequestLimitReason(
+				contextMargin + outputReserve,
+				100_000,
+				level,
+				stageMaxTokens,
+				"fast",
+				request,
+			),
+			undefined,
+		);
 		assert.match(
-			classifierRequestLimitReason(10_000, 32_000, level, 512, "fast", request) ?? "",
+			classifierRequestLimitReason(
+				contextMargin + outputReserve - 1,
+				100_000,
+				level,
+				stageMaxTokens,
+				"fast",
+				request,
+			) ?? "",
+			new RegExp(`${outputReserve} output tokens reserved`),
+		);
+	}
+
+	for (const [level, oldReasoningBudget] of [
+		["low", 2048],
+		["xhigh", 16384],
+		["max", 16384],
+	] as const) {
+		assert.match(
+			classifierRequestLimitReason(
+				contextMargin + stageMaxTokens + oldReasoningBudget,
+				100_000,
+				level,
+				stageMaxTokens,
+				"fast",
+				request,
+			) ?? "",
 			/Exact tool input cannot fit.*fails closed/,
 		);
 	}
