@@ -174,6 +174,26 @@ test("tool_call makes blocked actions operationally explicit", async () => {
 	assert.equal(harness.classifierCalls, 1);
 });
 
+test("tool_call makes cancelled actions operationally explicit", async () => {
+	const ctx = createFakeCtx([], { signal: AbortSignal.abort() });
+	const harness = await setupHookTest({ ctx });
+
+	const result = await harness.emit("tool_call", {
+		toolName: "read",
+		input: { path: "README.md" },
+	}, harness.ctx) as { block?: boolean; reason?: string };
+
+	assert.equal(result.block, true);
+	assert.match(result.reason ?? "", /cancelled/i);
+	assert.match(result.reason ?? "", /tool did not run/i);
+	assert.match(result.reason ?? "", /do not claim success/i);
+	assert.match(result.reason ?? "", /rely on effects from this call/i);
+	assert.match(result.reason ?? "", /equivalent workaround/i);
+	assert.match(result.reason ?? "", /report the block.*before continuing with dependent work/i);
+	assert.match(result.reason ?? "", /independent work can continue/i);
+	assert.equal(harness.classifierCalls, 0);
+});
+
 test("before_agent_start adds blocked-action guidance when auto mode is enabled", async () => {
 	const harness = await setupHookTest();
 	const result = await harness.emit("before_agent_start", {
