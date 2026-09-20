@@ -184,7 +184,7 @@ The tests cover these safety-sensitive areas:
 
 ## Publishing
 
-When a maintainer publishes a GitHub Release, GitHub Actions publishes the package to npm. The release tag must match `package.json` exactly. The forms `v1.0.0` and `1.0.0` both match version `1.0.0`.
+When a maintainer publishes a GitHub Release, GitHub Actions publishes the package to npm. The required release tag format is `v<version>`. The `<version>` value must be the same as the version in `package.json`. For example, version `1.0.0` requires tag `v1.0.0`.
 
 The workflow uses npm Trusted Publishing, so it does not need an npm token secret. Configure this package on npm with this repository and workflow file (`.github/workflows/publish.yml`). The workflow builds the package, runs `npm run check`, and publishes with npm provenance.
 
