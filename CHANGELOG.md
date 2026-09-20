@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file.
 ## Bug fixes
 
 - **Classifier model validation** — Reject non-string and malformed `classifierModel` values during diagnostics and configuration merging. Preserve valid lower-precedence values and the session-model fallback. Prevent invalid configuration from causing tool-hook exceptions. (#55)
+- **Dynamic Bash allow coverage** — Route commands with unresolved Bash argument expansions or active pathname expansions to classifier review. Preserve static quoted, escaped, and ANSI-C glob literals. (#54)
 
 - **Explicit blocked-action feedback** — State that blocked tools did not run. Tell the agent not to claim success or rely on blocked effects. Require a report before dependent work continues. (#38)
 - **Status indicator separator** — Add one space between the `AM` prefix and the status symbol.
