@@ -441,11 +441,11 @@ export function classifierRequestLimitReason(
     ? 0
     : {
       minimal: 1024,
-      low: 2048,
+      low: 4096,
       medium: 8192,
       high: 16384,
-      xhigh: 16384,
-      max: 16384,
+      xhigh: 32768,
+      max: 32768,
     }[reasoningLevel];
   const outputReserve = Math.min(
     stageMaxTokens + reasoningBudget,
