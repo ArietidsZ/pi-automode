@@ -306,7 +306,50 @@ test("legacy model registries preserve classifier tools through compat completio
 	assert.equal((simpleCalls[0]?.[1] as { tools?: unknown }).tools, tools);
 });
 
-test("current model registries preserve classifier tools without loading compat functions", async () => {
+test("Pi 0.86 model registries normalize simple completion without loading compat functions", async () => {
+	let loadCalls = 0;
+	let providerCalls = 0;
+	const rawContexts: unknown[] = [];
+	const simpleCalls: Array<{ model: unknown; context: unknown; options: unknown }> = [];
+	const registry = {
+		complete: async (_model: unknown, context: unknown) => {
+			rawContexts.push(context);
+			return assistantWith("raw");
+		},
+		streamSimple: (model: unknown, context: unknown, options: unknown) => {
+			simpleCalls.push({ model, context, options });
+			return { result: async () => assistantWith("simple") };
+		},
+		getProvider: () => {
+			providerCalls++;
+			throw new Error("direct provider fallback must not run");
+		},
+	};
+	const completions = createRegistryCompletionFns(registry, async () => {
+		loadCalls++;
+		return {
+			rawComplete: async () => assistantWith("fallback"),
+			simpleComplete: async () => assistantWith("fallback"),
+		};
+	});
+	const tools = [{ name: "classifier_decision" }] as never;
+	const messages = [{ role: "user", content: [{ type: "text", text: "classify" }], timestamp: 1 }] as never;
+	const context = { systemPrompt: "policy", messages, tools };
+	const model = { provider: "test" } as never;
+	const options = { maxTokens: 1, reasoning: "high" } as never;
+
+	assert.equal((await completions.rawComplete(model, context, options)).content[0]?.type, "text");
+	assert.equal((await completions.simpleComplete(model, context, options)).content[0]?.type, "text");
+	assert.equal(loadCalls, 0);
+	assert.equal(providerCalls, 0);
+	assert.equal(simpleCalls.length, 1);
+	assert.equal(simpleCalls[0]?.model, model);
+	assert.equal((rawContexts[0] as { tools?: unknown }).tools, tools);
+	assert.deepEqual(simpleCalls[0]?.context, context);
+	assert.equal(simpleCalls[0]?.options, options);
+});
+
+test("older Pi model registries use direct provider simple completion without loading compat functions", async () => {
 	let loadCalls = 0;
 	const rawContexts: unknown[] = [];
 	const simpleContexts: unknown[] = [];
@@ -378,7 +421,7 @@ test("default classifier sends OpenCode session headers through raw registry com
 	assert.equal(calls[0]?.options.headers["x-opencode-client"], "pi");
 });
 
-test("runtime provider simple completion preserves reasoning and adds OpenCode session headers", async () => {
+test("Pi 0.86 registry simple completion preserves reasoning and adds OpenCode session headers", async () => {
 	const model = {
 		provider: "opencode",
 		id: "runtime-reasoner",
@@ -392,18 +435,18 @@ test("runtime provider simple completion preserves reasoning and adds OpenCode s
 	let rawCalls = 0;
 	let authCalls = 0;
 	const signal = new AbortController().signal;
-	const provider = {
-		streamSimple(callModel: any, context: any, options: any) {
-			simpleCalls.push({ model: callModel, context, options });
-			return { result: async () => assistantWith("0") };
-		},
-	};
 	const ctx = createFakeCtx([], {
 		model,
 		signal,
 		modelRegistry: {
 			find: () => model,
-			getProvider: () => provider,
+			streamSimple(callModel: any, context: any, options: any) {
+				simpleCalls.push({ model: callModel, context, options });
+				return { result: async () => assistantWith("0") };
+			},
+			getProvider: () => {
+				throw new Error("direct provider fallback must not run");
+			},
 			getApiKeyAndHeaders: async () => authCalls++ === 0
 				? {
 					ok: true,

@@ -133,15 +133,22 @@ export type ClassifierCompletionFn = (
   },
 ) => Promise<AssistantMessage>;
 
+type LegacySimpleProvider = {
+  streamSimple: (
+    model: Model<any>,
+    context: ClassifierCompletionContext,
+    options: Parameters<ClassifierCompletionFn>[2],
+  ) => { result: () => Promise<AssistantMessage> };
+};
+
 type RegistryCompletionApi = {
   complete?: ClassifierCompletionFn;
-  getProvider?: (provider: string) => {
-    streamSimple: (
-      model: Model<any>,
-      context: ClassifierCompletionContext,
-      options: Parameters<ClassifierCompletionFn>[2],
-    ) => { result: () => Promise<AssistantMessage> };
-  } | undefined;
+  streamSimple?: (
+    model: Model<any>,
+    context: ClassifierCompletionContext,
+    options: Parameters<ClassifierCompletionFn>[2],
+  ) => { result: () => Promise<AssistantMessage> };
+  getProvider?: (provider: string) => unknown;
 };
 type ClassifierCompletionFallbacks = {
   rawComplete: ClassifierCompletionFn;
@@ -164,9 +171,8 @@ async function loadCompatCompletionFns(): Promise<ClassifierCompletionFallbacks>
 }
 
 /**
- * Prefer the current runtime registry so extension-registered providers remain
- * visible. Older Pi-family runtimes (including OMP 18) expose neither
- * `complete` nor `getProvider`; lazily load the compat API they already use.
+ * Prefer current registry completion APIs so Pi can normalize contexts and keep
+ * extension-registered providers visible. Retain older Pi and OMP fallbacks.
  */
 export function createRegistryCompletionFns(
   registry: RegistryCompletionApi,
@@ -184,16 +190,21 @@ export function createRegistryCompletionFns(
           context,
           options,
         );
-  const simpleComplete: ClassifierCompletionFn =
-    typeof registry.getProvider === "function"
-      ? (model, context, options) =>
-        completeSimpleWithRegistry(registry, model, context, options)
-      : async (model, context, options) =>
-        (await (fallbackPromise ??= fallbackLoader())).simpleComplete(
-          model,
-          context,
-          options,
-        );
+  let simpleComplete: ClassifierCompletionFn;
+  if (typeof registry.streamSimple === "function") {
+    simpleComplete = (model, context, options) =>
+      registry.streamSimple!.call(registry, model, context, options).result();
+  } else if (typeof registry.getProvider === "function") {
+    simpleComplete = (model, context, options) =>
+      completeSimpleWithProvider(registry, model, context, options);
+  } else {
+    simpleComplete = async (model, context, options) =>
+      (await (fallbackPromise ??= fallbackLoader())).simpleComplete(
+        model,
+        context,
+        options,
+      );
+  }
   return { rawComplete, simpleComplete };
 }
 
@@ -313,17 +324,18 @@ async function completeClassifierAttempt(
 }
 
 /**
- * Run normalized Pi AI completion through the provider in Pi's runtime registry.
- * Callers use this only when the registry exposes `getProvider`; legacy
- * registries take the compat completion path instead.
+ * Run simple completion directly through an older Pi runtime provider.
+ * Callers use this only when the registry has no normalizing `streamSimple`.
  */
-async function completeSimpleWithRegistry(
+async function completeSimpleWithProvider(
   registry: RegistryCompletionApi,
   model: Model<any>,
   context: ClassifierCompletionContext,
   options: Parameters<ClassifierCompletionFn>[2],
 ): Promise<AssistantMessage> {
-  const provider = registry.getProvider?.(model.provider);
+  const provider = registry.getProvider?.(model.provider) as
+    | LegacySimpleProvider
+    | undefined;
   if (!provider) throw new Error(`Unknown provider: ${model.provider}`);
   return provider.streamSimple(model, context, options).result();
 }
