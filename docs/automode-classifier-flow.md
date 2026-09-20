@@ -301,9 +301,13 @@ separate from the transcript. Pi-automode does not truncate it:
 {"toolName":"bash","input":{"command":"npm test"}}
 ```
 
-Both classifier stages receive the same context message and exact action
-message. If the exact action cannot fit in the classifier model's context
-window, auto mode blocks the call instead of removing action content.
+Both classifier stages receive the same context message and exact action message. Pi-automode checks each complete request before it sends that request. The estimate includes the system prompt, all user-message text, the stage instruction, and the serialized tool schema when the detailed stage uses it.
+
+The estimate matches Pi 0.86: it counts approximately one token for each four UTF-16 code units with `Math.ceil(text.length / 4)`. Pi-automode also reserves the stage output limit, the configured reasoning budget, and Pi's 4,096-token context margin.
+
+Pi-automode checks the fast request before the fast-stage call. A fast result of `0` allows the action without requiring space for a detailed request. After a fast result of `1`, pi-automode checks the detailed request, including the `classifier_decision` schema and the larger detailed output reserve.
+
+If a stage request cannot fit in the classifier model's context window, auto mode blocks the call instead of removing action content.
 
 Pi-automode builds the transcript from active Pi context entries. It includes only:
 
