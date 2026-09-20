@@ -90,6 +90,7 @@ AM ● a:12 d:2 ca:5 cd:1
 ## Docs
 
 - [Configuration](docs/configuration.md)
+- [Permission recipes](docs/permission-recipes.md)
 - [Defaults and rule-list behavior](docs/defaults.md)
 - [Auto-mode classifier flow](docs/automode-classifier-flow.md)
 - [Observability logging](docs/observability-logging.md)
@@ -136,26 +137,7 @@ Pi-automode parses Bash structure with `unbash` before permission and determinis
 ## Examples
 
 - `examples/automode.local.json`: copy to `.pi/automode.local.json` in a project and edit the domains, buckets, and source-control org.
-
-### Pro tip
-
-The default rule set might cause denials like this:
-
-> Auto mode blocked subagent: Delegated workers would modify pre-existing files outside the user's bounded authorization, including migrations, CLI code, and approval documentation.
-
-This is to be expected as the included classifier rules are very conservative and err on the side of caution! To explicitly give your robot more leeway, adjust your global `autoMode.allow` entry (or its project-level counterparts). For example, my personal `~/.pi/agent/extensions/pi-automode/config.json` file looks like this:
-
-```json
-{
-  "autoMode": {
-    "allow": [
-      "$defaults",
-      "Creating, modifying, and deleting local files within the Git repository or worktree. This includes pre-existing source code, migrations, CLI code, tests, and project documentation. This permission applies only to local implementation work and excludes files outside the assigned repository/worktree, external systems, credentials, safety controls, and Git history changes."
-    ],
-    …
-  }
-}
-```
+- [Permission recipes](docs/permission-recipes.md): use narrow examples for common permission and classifier-policy changes.
 
 ## Known limits
 
