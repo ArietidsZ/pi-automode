@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
 
 ## Bug fixes
 
+- **Explicit blocked-action feedback** — State that blocked tools did not run. Tell the agent not to claim success or rely on blocked effects. Require a report before dependent work continues. (#38)
 - **Status indicator separator** — Add one space between the `AM` prefix and the status symbol.
 - **Pi 0.86 classifier compatibility** — Route explicit-reasoning classifier calls through the model registry's normalized streaming API. Keep direct-provider support for older Pi versions and the compat fallback for OMP 18. (#52)
 - **Shared classifier reasoning reserves** — Use OMP 18 Anthropic reasoning budgets for classifier context checks under Pi and OMP. Reserve 4,096 tokens at `low` and 32,768 tokens at `xhigh` and `max` for all classifier providers. (#51)

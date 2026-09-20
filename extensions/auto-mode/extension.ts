@@ -331,6 +331,10 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       };
     }
 
+    function blockedToolReason(reason: string): string {
+      return `[pi-automode] Action blocked; the tool did not run. ${reason} Do not claim success, rely on effects from this call, or attempt an equivalent workaround. Report the block to the user before continuing with dependent work. Independent work can continue.`;
+    }
+
     function block(
       ctx: ExtensionContext,
       denial: DenialRecord,
@@ -364,7 +368,10 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
           "warning",
         );
       }
-      return { block: true, reason: `[pi-automode] ${denial.reason}` };
+      return {
+        block: true,
+        reason: blockedToolReason(denial.reason),
+      };
     }
 
     function allow(
@@ -440,7 +447,9 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
       // 7. classifier for every remaining action, fail-closed on setup/parse errors.
       const cfg = effectiveConfig();
       if (!cfg.enabled) return undefined;
-      if (ctx.signal?.aborted) return { block: true, reason: "Cancelled" };
+      if (ctx.signal?.aborted) {
+        return { block: true, reason: blockedToolReason("Cancelled") };
+      }
 
       const isOwnedInspection = event.toolName === INSPECT_TOOL &&
         ownsInspectionTool();
