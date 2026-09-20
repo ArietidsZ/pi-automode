@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -174,24 +174,68 @@ test("tool_call makes blocked actions operationally explicit", async () => {
 	assert.equal(harness.classifierCalls, 1);
 });
 
-test("tool_call makes cancelled actions operationally explicit", async () => {
-	const ctx = createFakeCtx([], { signal: AbortSignal.abort() });
-	const harness = await setupHookTest({ ctx });
+test("tool_call records cancelled actions without Bash analysis or classification", async () => {
+	const dir = mkdtempSync(join(os.tmpdir(), "pi-automode-cancelled-hook-"));
+	try {
+		const sessionFile = join(dir, "session.jsonl");
+		const ctx = createFakeCtx([], { signal: AbortSignal.abort(), sessionFile });
+		let bashAnalysisCalls = 0;
+		const harness = await setupHookTest({
+			config: baseConfig({ log: { enabled: true, classifierIo: false } }),
+			ctx,
+			analyze: (...args) => {
+				bashAnalysisCalls += 1;
+				return analyzeBash(...args);
+			},
+		});
 
-	const result = await harness.emit("tool_call", {
-		toolName: "read",
-		input: { path: "README.md" },
-	}, harness.ctx) as { block?: boolean; reason?: string };
+		const result = await harness.emit("tool_call", {
+			toolName: "bash",
+			input: { command: "echo safe" },
+		}, harness.ctx) as { block?: boolean; reason?: string };
 
-	assert.equal(result.block, true);
-	assert.match(result.reason ?? "", /cancelled/i);
-	assert.match(result.reason ?? "", /tool did not run/i);
-	assert.match(result.reason ?? "", /do not claim success/i);
-	assert.match(result.reason ?? "", /rely on effects from this call/i);
-	assert.match(result.reason ?? "", /equivalent workaround/i);
-	assert.match(result.reason ?? "", /report the block.*before continuing with dependent work/i);
-	assert.match(result.reason ?? "", /independent work can continue/i);
-	assert.equal(harness.classifierCalls, 0);
+		assert.equal(result.block, true);
+		assert.match(result.reason ?? "", /cancelled/i);
+		assert.match(result.reason ?? "", /tool did not run/i);
+		assert.match(result.reason ?? "", /do not claim success/i);
+		assert.match(result.reason ?? "", /rely on effects from this call/i);
+		assert.match(result.reason ?? "", /equivalent workaround/i);
+		assert.match(result.reason ?? "", /report the block.*before continuing with dependent work/i);
+		assert.match(result.reason ?? "", /independent work can continue/i);
+		assert.equal(bashAnalysisCalls, 0);
+		assert.equal(harness.classifierCalls, 0);
+
+		const state = harness.entries.at(-1)?.data;
+		assert.equal(harness.entries.at(-1)?.customType, "pi-automode-state");
+		assert.equal(state.checkedActions, 1);
+		assert.equal(state.blockedActions, 1);
+		assert.equal(state.lastDecision, "block");
+		assert.equal(state.lastReason, "Cancelled");
+		assert.equal(state.recentDenials.length, 1);
+		assert.equal(state.recentDenials[0].kind, "setup");
+		assert.equal(state.recentDenials[0].toolName, "bash");
+		assert.equal(state.recentDenials[0].reason, "Cancelled");
+		assert.match(state.recentDenials[0].action, /echo safe/);
+
+		assert.match(ctx.statuses.at(-1)?.text ?? "", /d:1/);
+		assert.deepEqual(ctx.notifications.at(-1), {
+			message: "Auto mode blocked bash: Cancelled",
+			type: "warning",
+		});
+
+		const logEntries = readFileSync(
+			join(dir, "session-pi-automode.jsonl"),
+			"utf8",
+		).trim().split("\n").map((line) => JSON.parse(line));
+		assert.equal(logEntries.length, 1);
+		assert.equal(logEntries[0].type, "decision");
+		assert.equal(logEntries[0].kind, "setup");
+		assert.equal(logEntries[0].outcome, "block");
+		assert.equal(logEntries[0].reason, "Cancelled");
+		assert.equal(logEntries[0].summary, state.recentDenials[0].action);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("before_agent_start adds blocked-action guidance when auto mode is enabled", async () => {
