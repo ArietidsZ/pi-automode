@@ -560,7 +560,7 @@ export function matchesAllowedToolPatterns(
   }
   if (
     bashAnalysis.commands.some((command) =>
-      command.dynamicName || command.dynamicShellScript
+      command.dynamic || command.dynamicName || command.dynamicShellScript
     )
   ) {
     return false;

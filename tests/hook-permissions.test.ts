@@ -490,7 +490,6 @@ test("composite Bash allow patterns reject different group and wrapper structure
 test("composite Bash allow patterns preserve nested, group, and wrapper structure", async () => {
 	for (const [rawPattern, command] of [
 		["bash({ git status*; echo *; })", "{ git status --short; echo done; }"],
-		["bash(echo $(git status*))", "echo $(git status --short)"],
 		["bash(bash -c 'git status* && echo *')", "bash -c 'git status --short && echo done'"],
 		["bash(sh -c 'git status*')", "sh -c 'git status --short'"],
 		["bash(eval 'git status*')", "eval 'git status --short'"],
@@ -710,21 +709,18 @@ test("plain Bash allow patterns reject independently covered nested execution", 
 		{
 			command: 'echo "$(git status --short)"',
 			plainPatterns: ["bash(echo *)", "bash(git status*)"],
-			compositePattern: 'bash(echo "$(git status*)")',
 		},
 		{
 			command: "cat < <(git status --short)",
 			plainPatterns: ["bash(cat)", "bash(git status*)"],
-			compositePattern: undefined,
 		},
 		{
 			command: 'echo "$(( $(git status --short) + 1 ))"',
 			plainPatterns: ["bash(echo *)", "bash(git status*)"],
-			compositePattern: 'bash(echo "$(( $(git status*) + 1 ))")',
 		},
 	] as const;
 
-	for (const { command, plainPatterns, compositePattern } of cases) {
+	for (const { command, plainPatterns } of cases) {
 		const plain = plainPatterns.map((raw) => parseToolPattern(raw));
 		assert.equal(plain.every((pattern) => !!pattern), true);
 		const plainHarness = await setupHookTest({
@@ -743,20 +739,6 @@ test("plain Bash allow patterns reject independently covered nested execution", 
 		assert.equal(rejected.block, true, command);
 		assert.match(rejected.reason ?? "", /nested Bash execution requires review/, command);
 		assert.equal(plainHarness.classifierCalls, 1, command);
-
-		if (compositePattern) {
-			const composite = parseToolPattern(compositePattern);
-			assert.ok(composite);
-			const compositeHarness = await setupHookTest({
-				config: baseConfig({ permissionAllow: [composite] }),
-			});
-			const allowed = await compositeHarness.emit("tool_call", {
-				toolName: "bash",
-				input: { command },
-			}, compositeHarness.ctx);
-			assert.equal(allowed, undefined, command);
-			assert.equal(compositeHarness.classifierCalls, 0, command);
-		}
 	}
 });
 
@@ -788,6 +770,28 @@ test("Bash permission allow rejects dynamic executable structure", async () => {
 		assert.match(result.reason ?? "", /dynamic Bash structure/, command);
 	}
 	assert.equal(harness.classifierCalls, 6);
+});
+
+test("Bash permission allow routes dynamic arguments to the classifier", async () => {
+	const allow = parseToolPattern("bash(rm -rf *)");
+	assert.ok(allow);
+	const harness = await setupHookTest({
+		config: baseConfig({ permissionAllow: [allow] }),
+		classifier: async () => ({
+			decision: "block",
+			tier: "none",
+			reason: "dynamic Bash arguments require review",
+		}),
+	});
+
+	const result = await harness.emit("tool_call", {
+		toolName: "bash",
+		input: { command: 'rm -rf "$PWD/../../etc"' },
+	}, harness.ctx) as { block?: boolean; reason?: string };
+
+	assert.equal(result.block, true);
+	assert.match(result.reason ?? "", /dynamic Bash arguments require review/);
+	assert.equal(harness.classifierCalls, 1);
 });
 
 test("the tool hook analyzes each Bash input once", async () => {
