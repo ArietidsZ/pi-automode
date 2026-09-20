@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file.
 ## Bug fixes
 
 - **Pi 0.86 classifier compatibility** — Route explicit-reasoning classifier calls through the model registry's normalized streaming API. Keep direct-provider support for older Pi versions and the compat fallback for OMP 18. (#52)
+- **Classifier context budgeting** — Estimate fast and detailed classifier requests in tokens instead of mixing UTF-8 bytes with token limits. Check detailed-stage capacity only after the fast stage requests review. Large project contexts no longer block small actions that fit. (#37)
 
 ## [1.16.0] - 2026-09-07
 

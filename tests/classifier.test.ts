@@ -2,18 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
+	CLASSIFIER_DECISION_TOOL,
 	CLASSIFIER_DETAILED_INSTRUCTION,
+	CLASSIFIER_FAST_INSTRUCTION,
 	CLASSIFIER_SYSTEM_PROMPT,
 	buildClassifierActionMessage,
 	buildClassifierTranscript,
-	classifierActionLimitReason,
 	classifierCacheSessionId,
+	classifierRequestLimitReason,
 	classifyInStages,
 	classifyWithRetry,
 	createClassifierCompletionPlan,
 	createRegistryCompletionFns,
 	createPiAutomode,
 	defaultClassifyAction,
+	estimateClassifierContextTokens,
 	parseClassifierDecision,
 	serializeClassifierAction,
 	type ClassifierIoAttempt,
@@ -226,15 +229,21 @@ function fakeComplete(responses: AssistantMessage[]) {
 	return { fn: fn as never, calls };
 }
 
-function stagedPrompt(action = "exact action") {
+function stagedPrompt(action = "exact action", context = "context") {
 	return {
 		systemPrompt: "policy",
 		contextMessage: {
 			role: "user" as const,
-			content: [{ type: "text" as const, text: "context" }],
+			content: [{ type: "text" as const, text: context }],
 			timestamp: 1,
 		},
 		actionMessage: buildClassifierActionMessage(action),
+	};
+}
+
+function classifierWithContext(contextWindow = 200_000, maxTokens = 32_000) {
+	return {
+		model: { provider: "test", id: "x", contextWindow, maxTokens } as any,
 	};
 }
 
@@ -573,77 +582,86 @@ test("classifier action serialization preserves long input independently of tran
 	assert.equal((message.content as Array<{ text?: string }>)[1]?.text, action);
 });
 
-test("classifier action size checks fail closed instead of truncating", () => {
+test("classifier context estimates mirror Pi 0.86 text and tool counting", () => {
+	const tools = [CLASSIFIER_DECISION_TOOL];
+	const context = {
+		systemPrompt: "policy",
+		messages: [
+			{
+				role: "user" as const,
+				content: [
+					{ type: "text" as const, text: "abcde" },
+					{ type: "text" as const, text: "fghi" },
+				],
+				timestamp: 1,
+			},
+			{
+				role: "user" as const,
+				content: [{ type: "text" as const, text: "context" }],
+				timestamp: 2,
+			},
+		],
+		tools,
+	};
+
+	assert.equal(
+		estimateClassifierContextTokens(context),
+		Math.ceil("policy".length / 4) +
+			Math.ceil("abcdefghi".length / 4) +
+			Math.ceil("context".length / 4) +
+			Math.ceil(JSON.stringify(tools).length / 4),
+	);
+});
+
+test("classifier request size checks fail closed instead of truncating", () => {
 	const action = serializeClassifierAction("write", {
 		path: "/tmp/project/output.txt",
 		content: "x".repeat(10_000),
 	});
+	const prompt = stagedPrompt(action);
+	const request = {
+		systemPrompt: prompt.systemPrompt,
+		messages: [
+			prompt.contextMessage,
+			prompt.actionMessage,
+			{
+				role: "user" as const,
+				content: [{ type: "text" as const, text: CLASSIFIER_FAST_INSTRUCTION }],
+				timestamp: 2,
+			},
+		],
+	};
 	assert.match(
-		classifierActionLimitReason(
-			4096,
-			32_000,
-			undefined,
-			512,
-			"policy",
-			"context",
-			action,
-		) ?? "",
+		classifierRequestLimitReason(4096, 32_000, undefined, 512, "fast", request) ?? "",
 		/Exact tool input cannot fit.*without truncation.*fails closed/,
 	);
 	assert.equal(
-		classifierActionLimitReason(
-			200_000,
-			32_000,
-			undefined,
-			512,
-			"policy",
-			"context",
-			action,
-		),
+		classifierRequestLimitReason(200_000, 32_000, undefined, 512, "fast", request),
 		undefined,
 	);
 	assert.match(
-		classifierActionLimitReason(
-			Number.NaN,
-			32_000,
-			undefined,
-			512,
-			"policy",
-			"context",
-			action,
-		) ?? "",
+		classifierRequestLimitReason(Number.NaN, 32_000, undefined, 512, "fast", request) ?? "",
 		/no valid context-window limit.*fails closed/,
 	);
 });
 
-test("classifier action size checks reserve explicit reasoning budgets", () => {
+test("classifier request size checks reserve explicit reasoning budgets", () => {
 	const action = serializeClassifierAction("write", {
 		path: "/tmp/project/output.txt",
 		content: "x".repeat(10_000),
 	});
+	const prompt = stagedPrompt(action);
+	const request = {
+		systemPrompt: prompt.systemPrompt,
+		messages: [prompt.contextMessage, prompt.actionMessage],
+	};
 	assert.equal(
-		classifierActionLimitReason(
-			20_000,
-			32_000,
-			"low",
-			512,
-			"policy",
-			"context",
-			action,
-		),
+		classifierRequestLimitReason(10_000, 32_000, "low", 512, "fast", request),
 		undefined,
 	);
 	for (const level of ["medium", "high"] as const) {
 		assert.match(
-			classifierActionLimitReason(
-				20_000,
-				32_000,
-				level,
-				512,
-				"policy",
-				"context",
-				action,
-			) ?? "",
+			classifierRequestLimitReason(10_000, 32_000, level, 512, "fast", request) ?? "",
 			/Exact tool input cannot fit.*fails closed/,
 		);
 	}
@@ -728,7 +746,7 @@ test("classifyInStages sends the exact action as a dedicated cached message", as
 	]);
 	const decision = await classifyInStages(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(action),
 		undefined,
 		{ sessionId: "pi-automode:test-session" },
@@ -741,12 +759,26 @@ test("classifyInStages sends the exact action as a dedicated cached message", as
 	}
 });
 
-test("classifyInStages allows after the fast stage and uses classifier cache affinity", async () => {
+test("classifyInStages accepts a small action with 55 KB of fixed context", async () => {
+	const { fn, calls } = fakeComplete([assistantWith("0")]);
+	const decision = await classifyInStages(
+		fn,
+		classifierWithContext(33_000),
+		stagedPrompt("small action", "x".repeat(55_000)),
+		undefined,
+		{ sessionId: "pi-automode:test-session" },
+	);
+
+	assert.equal(decision.decision, "allow");
+	assert.equal(calls.length, 1);
+});
+
+test("classifyInStages allows when the fast request fits and returns zero", async () => {
 	const { fn, calls } = fakeComplete([assistantWith("0")]);
 	const attempts: ClassifierIoAttempt[] = [];
 	const decision = await classifyInStages(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(5000),
 		stagedPrompt(),
 		undefined,
 		{ sessionId: "pi-automode:test-session", onAttempt: (attempt) => attempts.push(attempt) },
@@ -761,6 +793,23 @@ test("classifyInStages allows after the fast stage and uses classifier cache aff
 	assert.equal(attempts[0]?.stage, "fast");
 });
 
+test("classifyInStages blocks before detailed review when only the fast request fits", async () => {
+	const { fn, calls } = fakeComplete([assistantWith("1")]);
+	const attempts: ClassifierIoAttempt[] = [];
+	const decision = await classifyInStages(
+		fn,
+		classifierWithContext(5000),
+		stagedPrompt(),
+		undefined,
+		{ sessionId: "pi-automode:test-session", onAttempt: (attempt) => attempts.push(attempt) },
+	);
+
+	assert.equal(decision.decision, "block");
+	assert.match(decision.reason, /detailed classifier context.*fails closed/i);
+	assert.equal(calls.length, 1);
+	assert.deepEqual(attempts.map((attempt) => attempt.stage), ["fast"]);
+});
+
 test("classifyInStages runs detailed tool review and retries with the same cached prefix", async () => {
 	const { fn, calls } = fakeComplete([
 		assistantWith(" 1\n"),
@@ -770,7 +819,7 @@ test("classifyInStages runs detailed tool review and retries with the same cache
 	const attempts: ClassifierIoAttempt[] = [];
 	const decision = await classifyInStages(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		undefined,
 		{ sessionId: "pi-automode:test-session", onAttempt: (attempt) => attempts.push(attempt) },
@@ -832,7 +881,7 @@ test("classifyInStages forwards one reasoning level to fast and detailed calls",
 	]);
 	const decision = await classifyInStages(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		undefined,
 		{ sessionId: "pi-automode:test-session", reasoningLevel: "high" },
@@ -849,7 +898,7 @@ test("classifyInStages forwards the timeout to fast and detailed calls", async (
 	]);
 	const decision = await classifyInStages(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		undefined,
 		{ sessionId: "pi-automode:test-session", timeoutMs: 5000 },
@@ -868,7 +917,7 @@ test("classifyInStages aborts a pending fast stage at the configured deadline", 
 			attemptSignal = options.signal;
 			return new Promise(() => {});
 		},
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		undefined,
 		{
@@ -894,7 +943,7 @@ test("classifyInStages aborts a pending detailed stage at the configured deadlin
 			if (call === 1) return assistantWith("1");
 			return new Promise(() => {});
 		},
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		undefined,
 		{
@@ -914,7 +963,7 @@ test("classifyInStages preserves parent cancellation with a classifier deadline"
 	const controller = new AbortController();
 	const result = classifyInStages(
 		async () => new Promise(() => {}),
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		controller.signal,
 		{ sessionId: "pi-automode:test-session", timeoutMs: 1000 },
@@ -934,7 +983,7 @@ test("classifyWithRetry forwards the timeout to every detailed attempt", async (
 	const attempts: ClassifierIoAttempt[] = [];
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "policy", messages: [{ role: "user", content: [{ type: "text", text: "context" }], timestamp: 1 }] },
 		undefined,
 		{
@@ -954,7 +1003,7 @@ test("classifyWithRetry omits the timeout when not configured", async () => {
 	const { fn, calls } = fakeComplete([assistantWithDecision()]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "policy", messages: [{ role: "user", content: [{ type: "text", text: "context" }], timestamp: 1 }] },
 		undefined,
 		{ stage: "detailed", sessionId: "pi-automode:test-session" },
@@ -969,7 +1018,7 @@ test("classifyInStages fails closed on malformed fast-stage output", async () =>
 	const { fn, calls } = fakeComplete([assistantWith("0 because safe")]);
 	const decision = await classifyInStages(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		undefined,
 		{ sessionId: "pi-automode:test-session" },
@@ -985,7 +1034,7 @@ test("classifyInStages accepts surrounding whitespace and logs the fast-stage to
 	const attempts: ClassifierIoAttempt[] = [];
 	const decision = await classifyInStages(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		undefined,
 		{
@@ -1004,7 +1053,7 @@ test("classifyInStages fails closed when the fast stage throws", async () => {
 		async () => {
 			throw new Error("network down");
 		},
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		stagedPrompt(),
 		undefined,
 		{ sessionId: "pi-automode:test-session" },
@@ -1029,7 +1078,7 @@ test("classifyInStages fails closed on non-stop fast-stage allows", async () => 
 		const attempts: ClassifierIoAttempt[] = [];
 		const decision = await classifyInStages(
 			fn,
-			{ model: { provider: "test", id: "x" } },
+			classifierWithContext(),
 			stagedPrompt(),
 			undefined,
 			{ sessionId: "pi-automode:test-session", onAttempt: (attempt) => attempts.push(attempt) },
@@ -1046,7 +1095,7 @@ test("classifyWithRetry returns a valid decision tool call on the first attempt"
 	const { fn, calls } = fakeComplete([assistantWithDecision()]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1059,7 +1108,7 @@ test("classifyWithRetry forwards an explicitly configured temperature", async ()
 	const { fn, calls } = fakeComplete([assistantWithDecision()]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 		{ temperature: 0 },
@@ -1076,7 +1125,7 @@ test("classifyWithRetry rejects assistant JSON text and accepts a later decision
 	]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1091,7 +1140,7 @@ test("classifyWithRetry recovers when the first decision tool call is invalid", 
 	]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1106,7 +1155,7 @@ test("classifyWithRetry recovers from a truncated response on retry", async () =
 	]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1121,7 +1170,7 @@ test("classifyWithRetry retries a valid decision tool call truncated by the prov
 	]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1137,7 +1186,7 @@ test("classifyWithRetry does not authorize a valid tool call with stopReason sto
 	]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1153,7 +1202,7 @@ test("classifyWithRetry rejects JSON text even with stopReason toolUse", async (
 	]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1166,7 +1215,7 @@ test("classifyWithRetry fails closed when every attempt lacks a valid decision t
 	const { fn, calls } = fakeComplete([assistantWith(GARBAGE, "length"), assistantWith(GARBAGE)]);
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1183,7 +1232,7 @@ test("classifyWithRetry fails closed immediately without retrying when complete 
 	};
 	const decision = await classifyWithRetry(
 		fn as never,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 	);
@@ -1201,7 +1250,7 @@ test("classifyWithRetry surfaces provider-reported errors without retrying", asy
 	const attempts: ClassifierIoAttempt[] = [];
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 		{ onAttempt: (attempt) => attempts.push(attempt) },
@@ -1222,7 +1271,7 @@ test("classifyWithRetry fails closed on an empty provider error with a valid dec
 	const attempts: ClassifierIoAttempt[] = [];
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 		{ onAttempt: (attempt) => attempts.push(attempt) },
@@ -1244,7 +1293,7 @@ test("classifyWithRetry fails closed on an aborted detailed-stage decision tool 
 	const attempts: ClassifierIoAttempt[] = [];
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 		{ onAttempt: (attempt) => attempts.push(attempt) },
@@ -1265,7 +1314,7 @@ test("classifyWithRetry reports text and tool calls via onAttempt", async () => 
 	const attempts: ClassifierIoAttempt[] = [];
 	const decision = await classifyWithRetry(
 		fn,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 		{ onAttempt: (a) => attempts.push(a) },
@@ -1295,7 +1344,7 @@ test("classifyWithRetry reports a thrown attempt via onAttempt and fails closed"
 	};
 	const decision = await classifyWithRetry(
 		fn as never,
-		{ model: { provider: "test", id: "x" } },
+		classifierWithContext(),
 		{ systemPrompt: "s", messages: [] },
 		undefined,
 		{ onAttempt: (a) => attempts.push(a) },
