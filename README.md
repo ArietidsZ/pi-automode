@@ -79,7 +79,7 @@ The bundled `automode-diagnostics` skill uses this tool to diagnose unexpected d
 When the Pi TUI is available, the extension renders a persistent status line:
 
 ```text
-AM● a:12 d:2 ca:5 cd:1
+AM ● a:12 d:2 ca:5 cd:1
 ```
 
 - `AM` — auto-mode prefix. `●` means enabled. `○` means disabled through configuration or `/automode off`.
