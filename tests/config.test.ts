@@ -761,6 +761,17 @@ test("validateSettingsFile accepts permissions.allow and validates its entries",
 	);
 });
 
+test("validateSettingsFile diagnoses malformed permissions.deny patterns", () => {
+	const malformed = ["$defaults", "bash()", "bash(", 'bash(git push "unterminated)'];
+
+	assert.deepEqual(
+		validateSettingsFile({ permissions: { deny: malformed } }, "test-config"),
+		malformed.map((_, index) =>
+			`test-config: permissions.deny[${index}] must be a tool pattern string`
+		),
+	);
+});
+
 test("project-local classifier model overrides global classifier model", () => {
 	const config = buildEffectiveConfigFromSources({
 		globalSettings: [{ autoMode: { classifierModel: "global/model" } }],
