@@ -381,6 +381,20 @@ Classifier response did not contain a valid classifier decision tool call; auto 
 
 If the model call throws, pi-automode blocks the action immediately. It uses a classifier failure message.
 
+## Agent behavior after a blocked tool call
+
+Pi converts a blocked hook response into an error result and does not run the tool. Pi-automode does not set `terminate: true`, so Pi can request the next model response.
+
+The result states that the tool did not run and preserves the denial reason. The result and the Auto Mode guidance instruct the agent to:
+
+- report the block to the user before work that depends on the blocked action continues
+- not claim success or rely on effects from the blocked action
+- not try an equivalent workaround
+
+Independent work can continue. Interactive approval stays limited to configured `permissions.ask` rules. Classifier and deterministic denials stay final.
+
+These instructions decrease ambiguity in the model context. They do not guarantee that each model will follow the instructions.
+
 ## State, UI, and denial history
 
 Every checked action increments `checkedActions`.

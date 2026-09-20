@@ -364,7 +364,10 @@ export function createPiAutomode(options: PiAutomodeOptions = {}) {
           "warning",
         );
       }
-      return { block: true, reason: `[pi-automode] ${denial.reason}` };
+      return {
+        block: true,
+        reason: `[pi-automode] Action blocked; the tool did not run. ${denial.reason} Do not claim success, rely on effects from this call, or attempt an equivalent workaround. Report the block to the user before continuing with dependent work. Independent work can continue.`,
+      };
     }
 
     function allow(

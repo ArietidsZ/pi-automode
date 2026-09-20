@@ -152,7 +152,7 @@ test("tool_call routes read-only tools through classifier when classifyReadOnlyT
 	assert.equal(harness.classifierCalls, 1);
 });
 
-test("tool_call blocks read-only tools via classifier when classifyReadOnlyTools is true and classifier denies", async () => {
+test("tool_call makes blocked actions operationally explicit", async () => {
 	const harness = await setupHookTest({
 		config: baseConfig({ classifyReadOnlyTools: true }),
 		classifier: async () => ({ decision: "block", tier: "hard_deny", reason: "mock block" }),
@@ -165,7 +165,38 @@ test("tool_call blocks read-only tools via classifier when classifyReadOnlyTools
 
 	assert.equal(result.block, true);
 	assert.match(result.reason ?? "", /mock block/);
+	assert.match(result.reason ?? "", /tool did not run/i);
+	assert.match(result.reason ?? "", /do not claim success/i);
+	assert.match(result.reason ?? "", /rely on effects from this call/i);
+	assert.match(result.reason ?? "", /equivalent workaround/i);
+	assert.match(result.reason ?? "", /report the block.*before continuing with dependent work/i);
+	assert.match(result.reason ?? "", /independent work can continue/i);
 	assert.equal(harness.classifierCalls, 1);
+});
+
+test("before_agent_start adds blocked-action guidance when auto mode is enabled", async () => {
+	const harness = await setupHookTest();
+	const result = await harness.emit("before_agent_start", {
+		systemPrompt: "base prompt",
+		systemPromptOptions: { contextFiles: [] },
+	}, harness.ctx) as { systemPrompt?: string };
+
+	assert.match(result.systemPrompt ?? "", /pi-automode blocks a tool call/i);
+	assert.match(result.systemPrompt ?? "", /treat the action as not executed/i);
+	assert.match(result.systemPrompt ?? "", /do not claim success/i);
+	assert.match(result.systemPrompt ?? "", /equivalent workaround/i);
+	assert.match(result.systemPrompt ?? "", /report the block.*before continuing with dependent work/i);
+	assert.match(result.systemPrompt ?? "", /independent work can continue/i);
+});
+
+test("before_agent_start omits blocked-action guidance when auto mode is disabled", async () => {
+	const harness = await setupHookTest({ config: baseConfig({ enabled: false }) });
+	const result = await harness.emit("before_agent_start", {
+		systemPrompt: "base prompt",
+		systemPromptOptions: { contextFiles: [] },
+	}, harness.ctx);
+
+	assert.equal(result, undefined);
 });
 
 test("tool patterns for MCP and extension tools match by bare tool name only", () => {
