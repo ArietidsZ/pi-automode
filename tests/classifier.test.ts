@@ -752,7 +752,7 @@ test("classifier request ceilings compose the answer allowance and reasoning bud
 	assert.equal(classifierRequestMaxTokens(1200, "low", 3000), 3000);
 });
 
-test("classifier escalated ceilings stay inside the context window", () => {
+test("classifier escalated ceilings use context room unless the base is already larger", () => {
 	const context = { systemPrompt: "s", messages: [] };
 	assert.equal(
 		classifierEscalatedMaxTokens(200_000, 32_000, context, 1200),

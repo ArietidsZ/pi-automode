@@ -423,7 +423,11 @@ export function estimateClassifierContextTokens(
   return systemTokens + messageTokens + toolTokens;
 }
 
-/** Reasoning tokens reserved per explicit classifier reasoning level. Matches the OMP 18 budgets. */
+/**
+ * Output reserve from the #51 context check (OMP 18 values).
+ * Not pi-ai 0.86.0's thinking-pad table: that table uses 2048 at `low`
+ * and clamps `xhigh` and `max` to `high` (16384).
+ */
 const CLASSIFIER_REASONING_BUDGETS: Record<
   Exclude<EffectiveClassifierReasoningLevel, "off">,
   number
@@ -446,11 +450,11 @@ export function classifierReasoningBudget(
 }
 
 /**
- * Compose a stage output ceiling from the answer allowance and the reasoning
- * budget. This equals the output reserve the context-fit check guarantees.
- * On providers where hidden reasoning shares the output ceiling, the budget
- * grants reasoning room; on providers with separate thinking budgets, it only
- * widens the answer allowance.
+ * Ceiling passed to the completion function: allowance plus the #51 reserve,
+ * clamped to the model output limit. This matches the context-fit reserve.
+ * It does not split answer tokens from hidden reasoning. Shared-ceiling
+ * adapters treat the whole value as one cap. Budget-thinking adapters may
+ * add their own thinking budget on top, then clamp to the context window.
  */
 export function classifierRequestMaxTokens(
   stageMaxTokens: number,
@@ -464,10 +468,12 @@ export function classifierRequestMaxTokens(
 }
 
 /**
- * Output ceiling for a length-escalated retry: the model output limit, capped
- * to the room left in the context window. The raw provider path forwards
- * maxTokens without a context clamp, so this client-side cap is the only
- * context guard there. The result never drops below the base ceiling.
+ * Retry ceiling after a length stop: the smaller of the model output limit
+ * and the estimated context room, but never below the base ceiling. If the
+ * base already exceeds that room, the result does too. `classifyInStages`
+ * rejects an unfit base before the first call, so the staged path does not
+ * hit that branch. Raw completions do not clamp `maxTokens`; this function
+ * is a context guard only when it is not raised back to an oversized base.
  */
 export function classifierEscalatedMaxTokens(
   contextWindow: number,
@@ -751,9 +757,9 @@ export async function classifyWithRetry(
     if (failure) return failure;
     if (decision) return decision;
     if (response.stopReason === "length" && retryMaxTokens === undefined) {
-      // A length stop means hidden reasoning consumed the output ceiling, so
-      // repeating the identical request would truncate again. Retry once with
-      // the largest context-safe ceiling instead.
+      // The same ceiling would truncate again. Retry once at the smaller of
+      // the model output limit and the estimated context room, floored at
+      // the base ceiling. This does not prove the model will leave answer room.
       retryMaxTokens = classifierEscalatedMaxTokens(
         classifier.model.contextWindow,
         classifier.model.maxTokens,
@@ -825,9 +831,8 @@ export async function classifyInStages(
         apiKey: classifier.apiKey,
         headers: classifier.headers,
         env: classifier.env,
-        // Reasoning and OpenAI-compatible models may consume hidden reasoning,
-        // control, and EOS tokens before emitting the required visible digit.
-        // Grant the reasoning room the context-fit check already reserved.
+        // Send the reserve the context-fit check already uses. This raises
+        // the shared ceiling. It does not keep hidden reasoning off the digit.
         maxTokens: fastRequestMaxTokens,
         ...(options.reasoningLevel === undefined
           ? {}

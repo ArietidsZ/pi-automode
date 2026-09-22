@@ -34,7 +34,7 @@ Set a global default classifier model in `~/.pi/agent/extensions/pi-automode/con
 
 Pi AI clamps an unsupported value to the nearest level that the selected model supports. A model without reasoning support resolves to `off`. `low` matches the reasoning effort of Codex Auto Review.
 
-Each classifier request sends the stage answer allowance plus the reserved reasoning budget as its output limit. Hidden reasoning no longer consumes the answer room on providers where it shares the output ceiling. If truncation still occurs before the required `0` or `1` digit, increase `fastClassifierMaxTokens`. The default is 512, and the minimum is 16.
+Each classifier request sends the stage answer allowance plus the #51 reasoning reserve as `maxTokens`. The fast-stage allowance is 512. The detailed-stage allowance is 1200. At an explicit level this raises the shared output ceiling. It does not keep hidden reasoning out of the answer. Budget-thinking adapters may add their own thinking budget on top. At `xhigh` and `max`, a detailed request uses the model output limit when that limit is at most 33,968. If the fast stage still truncates before `0` or `1`, increase `fastClassifierMaxTokens`. The default allowance is 512, and the minimum is 16.
 
 `classifierTimeoutMs` limits each classifier request in milliseconds. The default is 20000, and the minimum is 1000. The fast and detailed stages have separate budgets.
 
