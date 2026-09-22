@@ -1408,6 +1408,43 @@ test("classifyWithRetry fails closed when the escalated retry also truncates", a
 	assert.equal(calls[1]?.maxTokens, 32_000);
 });
 
+test("classifyWithRetry skips the retry when the model limit bounds the ceiling", async () => {
+	const { fn, calls } = fakeComplete([
+		assistantWith(GARBAGE, "length"),
+		assistantWithDecision(),
+	]);
+	const decision = await classifyWithRetry(
+		fn,
+		classifierWithContext(200_000, 1200),
+		{ systemPrompt: "s", messages: [] },
+		undefined,
+	);
+
+	assert.equal(decision.decision, "block");
+	assert.match(decision.reason, /truncated/);
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0]?.maxTokens, 1200);
+});
+
+test("classifyWithRetry skips the retry when the ceiling cannot rise above context room", async () => {
+	const { fn, calls } = fakeComplete([
+		assistantWith(GARBAGE, "length"),
+		assistantWithDecision(),
+	]);
+	const decision = await classifyWithRetry(
+		fn,
+		classifierWithContext(10_000, 32_000),
+		{ systemPrompt: "s", messages: [] },
+		undefined,
+		{ maxTokens: 32_000 },
+	);
+
+	assert.equal(decision.decision, "block");
+	assert.match(decision.reason, /truncated/);
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0]?.maxTokens, 32_000);
+});
+
 test("classifyWithRetry retries malformed decisions without changing the ceiling", async () => {
 	const { fn, calls } = fakeComplete([
 		assistantWithDecision({ ...VALID_ALLOW, unexpected: true }),

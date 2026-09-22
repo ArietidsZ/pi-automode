@@ -337,7 +337,7 @@ Pi AI clamps the request to the nearest supported level. Models without reasonin
 
 Each classifier request sends the stage answer allowance plus the #51 reasoning reserve as `maxTokens`. The fast-stage allowance is 512 tokens. The detailed-stage allowance is 1200 tokens. `low` matches the reasoning effort of Codex Auto Review.
 
-That value is the context-fit reserve. On a shared-ceiling provider it is one output cap, not a split between reasoning and the answer. On a budget-thinking provider the adapter may add its own thinking budget and then clamp to the context window, so the wire limit can exceed this reserve. At `xhigh` and `max`, the composed detailed ceiling is the model output limit when that limit is at most 33,968.
+That value is the context-fit reserve. On a shared-ceiling provider it is one output cap, not a split between reasoning and the answer. On a budget-thinking provider the adapter may add its own thinking budget and then clamp to the context window, so the wire limit can exceed this reserve. At `xhigh` and `max`, a composed ceiling is the model output limit whenever that limit is at most the allowance plus the reserve (33,968 for the detailed stage, 33,280 for the fast stage).
 
 The extension asks Pi's model registry for API credentials. If the model cannot be found or credentials are unavailable, classification returns a blocking decision:
 
@@ -355,7 +355,7 @@ If a request exceeds its budget, pi-automode aborts it and blocks the action. A 
 
 The fast stage requires one visible digit. Its request uses the 512-token allowance plus the same reserve. Reasoning models can still spend hidden tokens before they emit the digit.
 
-Extra visible content fails fast-stage parsing. Detailed review uses the 1200-token allowance plus the same reserve. It can retry once after a missing, invalid, or truncated decision tool call. A length stop retries once at the model output limit or the estimated context room, whichever is smaller, and never below the first ceiling. If the first ceiling already exceeds that room, the retry keeps it.
+Extra visible content fails fast-stage parsing. Detailed review uses the 1200-token allowance plus the same reserve. It can retry once after a missing, invalid, or truncated decision tool call. A length stop retries once at the model output limit or the estimated context room, whichever is smaller, and never below the first ceiling. If the first ceiling already exceeds that room, the retry keeps it. If the retry ceiling cannot exceed the first ceiling, the retry is skipped and the action fails closed.
 
 ## Parsing the classifier result
 

@@ -474,6 +474,8 @@ export function classifierRequestMaxTokens(
  * rejects an unfit base before the first call, so the staged path does not
  * hit that branch. Raw completions do not clamp `maxTokens`; this function
  * is a context guard only when it is not raised back to an oversized base.
+ * A result equal to the base ceiling means no escalation is possible;
+ * `classifyWithRetry` skips the retry in that case.
  */
 export function classifierEscalatedMaxTokens(
   contextWindow: number,
@@ -756,21 +758,28 @@ export async function classifyWithRetry(
     );
     if (failure) return failure;
     if (decision) return decision;
+    lastReason =
+      response.stopReason === "length"
+        ? "Classifier response was truncated before producing a valid classifier decision tool call; auto mode fails closed."
+        : "Classifier response did not contain a valid classifier decision tool call; auto mode fails closed.";
     if (response.stopReason === "length" && retryMaxTokens === undefined) {
       // The same ceiling would truncate again. Retry once at the smaller of
       // the model output limit and the estimated context room, floored at
       // the base ceiling. This does not prove the model will leave answer room.
-      retryMaxTokens = classifierEscalatedMaxTokens(
+      const escalatedMaxTokens = classifierEscalatedMaxTokens(
         classifier.model.contextWindow,
         classifier.model.maxTokens,
         prompt,
         maxTokens,
       );
+      if (escalatedMaxTokens <= maxTokens) {
+        // The ceiling cannot rise (the model output limit already bounds the
+        // request), so the retry would repeat it identically. Fail closed now
+        // instead of spending a second attempt.
+        return { decision: "block", tier: "none", reason: lastReason };
+      }
+      retryMaxTokens = escalatedMaxTokens;
     }
-    lastReason =
-      response.stopReason === "length"
-        ? "Classifier response was truncated before producing a valid classifier decision tool call; auto mode fails closed."
-        : "Classifier response did not contain a valid classifier decision tool call; auto mode fails closed.";
   }
   return { decision: "block", tier: "none", reason: lastReason };
 }
@@ -831,8 +840,9 @@ export async function classifyInStages(
         apiKey: classifier.apiKey,
         headers: classifier.headers,
         env: classifier.env,
-        // Send the reserve the context-fit check already uses. This raises
-        // the shared ceiling. It does not keep hidden reasoning off the digit.
+        // Send the reserve the context-fit check already uses. At an
+        // explicit level this raises the shared ceiling. It does not keep
+        // hidden reasoning off the digit.
         maxTokens: fastRequestMaxTokens,
         ...(options.reasoningLevel === undefined
           ? {}
