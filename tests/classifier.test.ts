@@ -970,6 +970,27 @@ test("classifyInStages escalates the detailed retry ceiling after a length stop"
 	assert.equal(attempts[2]?.requestMaxTokens, 32_000);
 });
 
+test("classifyInStages skips the detailed retry when the model limit bounds the ceiling", async () => {
+	const { fn, calls } = fakeComplete([
+		assistantWith("1"),
+		assistantWith(GARBAGE, "length"),
+		assistantWithDecision(),
+	]);
+	const decision = await classifyInStages(
+		fn,
+		classifierWithContext(200_000, 16_384),
+		stagedPrompt(),
+		undefined,
+		{ sessionId: "pi-automode:test-session", reasoningLevel: "xhigh" },
+	);
+
+	assert.equal(decision.decision, "block");
+	assert.match(decision.reason, /truncated/);
+	assert.equal(calls.length, 2);
+	assert.equal(calls[0]?.maxTokens, 16_384);
+	assert.equal(calls[1]?.maxTokens, 16_384);
+});
+
 test("classifyInStages runs detailed tool review and retries with the same cached prefix", async () => {
 	const { fn, calls } = fakeComplete([
 		assistantWith(" 1\n"),

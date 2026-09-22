@@ -355,7 +355,7 @@ If a request exceeds its budget, pi-automode aborts it and blocks the action. A 
 
 The fast stage requires one visible digit. Its request uses the 512-token allowance plus the same reserve. Reasoning models can still spend hidden tokens before they emit the digit.
 
-Extra visible content fails fast-stage parsing. Detailed review uses the 1200-token allowance plus the same reserve. It can retry once after a missing, invalid, or truncated decision tool call. A length stop retries once at the model output limit or the estimated context room, whichever is smaller, and never below the first ceiling. If the first ceiling already exceeds that room, the retry keeps it. If the retry ceiling cannot exceed the first ceiling, the retry is skipped and the action fails closed.
+Extra visible content fails fast-stage parsing. Detailed review uses the 1200-token allowance plus the same reserve. It can retry once after a missing, invalid, or truncated decision tool call. A length stop retries once at the model output limit or the estimated context room, whichever is smaller, and never below the first ceiling. If the retry ceiling cannot exceed the first ceiling, the retry is skipped and the action fails closed after the first length stop.
 
 ## Parsing the classifier result
 

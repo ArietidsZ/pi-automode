@@ -773,9 +773,10 @@ export async function classifyWithRetry(
         maxTokens,
       );
       if (escalatedMaxTokens <= maxTokens) {
-        // The ceiling cannot rise (the model output limit already bounds the
-        // request), so the retry would repeat it identically. Fail closed now
-        // instead of spending a second attempt.
+        // The ceiling cannot rise: the model output limit or the estimated
+        // context room already bounds the request, so the retry would repeat
+        // it identically. Fail closed now instead of spending a second
+        // attempt.
         return { decision: "block", tier: "none", reason: lastReason };
       }
       retryMaxTokens = escalatedMaxTokens;
